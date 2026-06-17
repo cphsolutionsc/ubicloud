@@ -319,7 +319,7 @@ module Scheduling::Allocator
 
         # Emit the allocation query if the project is flagged for diagnostics or there were
         # no candidate hosts found.
-        if request.diagnostics || records.empty?
+        if request.diagnostics || (records.empty? && !request.location_filter.equal?(Prog::Vm::Metal::Nexus::GITHUB_RUNNER_LOCATION_FILTER))
           counts = []
           @datasets.each do |name, ds|
             count = ds.count

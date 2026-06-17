@@ -4,6 +4,8 @@ require "json"
 
 class Prog::Vm::Metal::Nexus < Prog::Base
   DEFAULT_SIZE = "standard-2"
+  GITHUB_RUNNER_LOCATION_FILTER = [Location::GITHUB_RUNNERS_ID, Location::HETZNER_FSN1_ID, Location::HETZNER_HEL1_ID].freeze
+  GITHUB_RUNNER_LOCATION_PREFERENCE = [Location::GITHUB_RUNNERS_ID].freeze
 
   subject_is :vm
   frame_reader :distinct_storage_devices, :exclude_host_ids, :exclude_data_centers, :gpu_count, :gpu_device,
@@ -53,8 +55,8 @@ class Prog::Vm::Metal::Nexus < Prog::Base
         if force_host_id
           [[], [], [], [force_host_id], []]
         elsif vm.location_id == Location::GITHUB_RUNNERS_ID
-          runner_location_filter = [Location::GITHUB_RUNNERS_ID, Location::HETZNER_FSN1_ID, Location::HETZNER_HEL1_ID]
-          runner_location_preference = [Location::GITHUB_RUNNERS_ID]
+          runner_location_filter = GITHUB_RUNNER_LOCATION_FILTER
+          runner_location_preference = GITHUB_RUNNER_LOCATION_PREFERENCE
           installation = runner&.installation
           prefs = installation&.allocator_preferences || {}
 

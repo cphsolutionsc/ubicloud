@@ -163,6 +163,16 @@ RSpec.describe Al do
       end
       Al::Allocation.best_allocation(req)
       expect(Al::Allocation.candidate_hosts(req)).to eq([])
+
+      gh_req = Al::Request.new(
+        "2464de61-7501-8374-9ab0-416caebe31da", 4, 8, 33,
+        [[1, {"use_bdev_ubi" => true, "size_gib" => 22, "boot" => false}],
+          [0, {"use_bdev_ubi" => false, "size_gib" => 11, "boot" => true}]],
+        "ubuntu-jammy", false, 0, nil, true, 0.65, "x64", ["accepting"], [], [], [], Prog::Vm::Metal::Nexus::GITHUB_RUNNER_LOCATION_FILTER, [],
+        "standard", 400, true, false, false, [],
+      )
+      expect(Clog).not_to receive(:emit)
+      expect(Al::Allocation.candidate_hosts(gh_req)).to eq([])
     end
 
     it "retrieves correct values" do
