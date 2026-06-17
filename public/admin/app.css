@@ -34,7 +34,7 @@ input[type=submit] {
   #ubid_form & { font-size: 0.9em; }
 }
 
-#start-local-e2e, #start-rollout {
+#start-local-e2e, #start-rollout, #start-semaphore-rollout {
   > div { margin-top: 10px; }
 }
 span.label {
@@ -278,4 +278,13 @@ code {
 .chart-cell {
   flex: 1;
   min-width: 400px;
+}
+
+#start-semaphore-rollout {
+  #wait-label-wrapper {
+    display: none;
+  }
+  &:has(input[name=increment][value=increment]:checked) #wait-label-wrapper {
+    display: block;
+  }
 }

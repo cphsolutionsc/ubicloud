@@ -48,11 +48,13 @@ end %>
 
 <h2>Start Semaphore Rollout</h2>
 
-<% form({action: "/rollouts/start/RolloutSemaphore", method: "post", id: "start-local-e2e"}, button: "Start Semaphore Rollout", wrapper: :div) do |f| %>
+<% form({action: "/rollouts/start/RolloutSemaphore", method: "post", id: "start-semaphore-rollout"}, button: "Start Semaphore Rollout", wrapper: :div) do |f| %>
   <%== f.input(:select, key: :class, label: "Class", required: true, add_blank: true, options: semaphore_classes) %>
+  <%== f.input(:select, key: :location_id, label: "Location", add_blank: true, options: Location.where(project_id: nil).order(:name).select_map([:name, :id]).each { it[1] = UBID.to_ubid(it[1]) }) %>
   <%== f.input(:text, key: :semaphore, label: "Semaphore", required: true) %>
+  <%== f.input(:text, key: :wait_label, label: "Wait Label", wrapper_attr: {id: "wait-label-wrapper"}) %>
   <%== f.input(:number, key: :gap, label: "Gap (seconds)", required: true, attr: {min: 5, max: 3600}, value: 60) %>
-  <%== f.input(:radioset, key: :increment, required: true, options: [["Increment", true], ["Decrement", false]], value: true) %>
+  <%== f.input(:radioset, key: :increment, required: true, options: [["Increment", "increment"], ["Increment Without Waiting", "increment-no-wait"], ["Decrement", "decrement"]], value: "increment") %>
 <% end %>
 
 <h2>Start Boot Image Rollout</h2>
