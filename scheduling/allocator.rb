@@ -306,7 +306,7 @@ module Scheduling::Allocator
           end
         end
 
-        # If we dont's want to use slices, place those only on hosts that do not accept them
+        # If we dont want to use slices, place those only on hosts that do not accept them
         # If we require a shared slice (for burstable vm), allocate those only on hosts that accept slices
         # In all other cases, the host's acceptance of slices will determine if the VM is created in a slice or not
         if !request.use_slices
@@ -317,7 +317,7 @@ module Scheduling::Allocator
 
         records = ds.all
 
-        # Emit the allocation query if the project is flagged for diagnostics or their were
+        # Emit the allocation query if the project is flagged for diagnostics or there were
         # no candidate hosts found.
         if request.diagnostics || records.empty?
           counts = []
