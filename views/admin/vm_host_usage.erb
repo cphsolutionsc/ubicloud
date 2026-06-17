@@ -1,0 +1,26 @@
+<% @page_title = "VmHost Usage" %>
+
+<% current = {location: @location_id, arch: @arch, cores: @cores, state: @state}.compact
+filter_url = lambda do |key, value|
+  params = current.dup
+  value.nil? ? params.delete(key) : (params[key] = value)
+  params.empty? ? "/vm-host-usage" : "/vm-host-usage?#{params.map { |k, v| "#{k}=#{v}" }.join("&")}"
+end %>
+
+<div>
+  <% [["Location", :location, @locations, @location_id], ["Arch", :arch, @archs.map { [it, it] }, @arch], ["Cores", :cores, @core_counts.map { [it, it] }, @cores], ["State", :state, @states.map { [it, it] }, @state]].each_with_index do |(label, key, options, active), i| %>
+    <%== "&nbsp;&nbsp;&mdash;&nbsp;&nbsp;" unless i.zero? %>
+    <strong><%= label %>:</strong>
+    <% if active %><a href="<%= filter_url.call(key, nil) %>">all</a><% else %><strong><a href="<%= filter_url.call(key, nil) %>">all</a></strong><% end %>
+    <% options.each do |name, value| %>
+      |
+      <% if active.to_s == value.to_s %><strong><a href="<%= filter_url.call(key, value) %>"><%= name %></a></strong><% else %><a href="<%= filter_url.call(key, value) %>"><%= name %></a><% end %>
+    <% end %>
+  <% end %>
+  <% unless current.empty? %>
+    &nbsp;&nbsp;
+    <form method="get" action="/vm-host-usage" style="display:inline"><input type="submit" value="Clear all"></form>
+  <% end %>
+</div>
+
+<%== part("components/table", title: nil, table_class: "vm-host-usage-table", data: @data, use_admin_label: false) %>

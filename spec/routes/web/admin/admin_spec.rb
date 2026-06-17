@@ -2779,4 +2779,74 @@ RSpec.describe CloverAdmin do
       expect(audit_log_content).to be_empty
     end
   end
+
+  it "shows VmHost usage filtered by location" do
+    vm_host = create_vm_host(data_center: "fsn1-dc1", total_cores: 48, used_cores: 4, total_hugepages_1g: 375, used_hugepages_1g: 32)
+    StorageDevice.create(name: "nvme0", total_storage_gib: 1000, available_storage_gib: 600, vm_host_id: vm_host.id)
+    StorageDevice.create(name: "nvme1", total_storage_gib: 500, available_storage_gib: 100, vm_host_id: vm_host.id)
+    SpdkInstallation.create(vm_host_id: vm_host.id, version: "v23.09", allocation_weight: 100)
+    VhostBlockBackend.create(vm_host_id: vm_host.id, version_code: 401, allocation_weight: 70)
+    VhostBlockBackend.create(vm_host_id: vm_host.id, version_code: 400, allocation_weight: 50)
+    # Weight 0 installations are disabled and must be omitted.
+    VhostBlockBackend.create(vm_host_id: vm_host.id, version_code: 399, allocation_weight: 0)
+    BootImage.create(name: "ubuntu-jammy", version: "1", vm_host_id: vm_host.id, size_gib: 14)
+    BootImage.create(name: "ubuntu-jammy", version: "2", vm_host_id: vm_host.id, size_gib: 14)
+    BootImage.create(name: "ubuntu-noble", version: "1", vm_host_id: vm_host.id, size_gib: 14)
+    create_vm(vm_host_id: vm_host.id)
+    create_vm(vm_host_id: vm_host.id)
+
+    # A host in another location that must be excluded by the location filter.
+    create_vm_host(location_id: Location::GITHUB_RUNNERS_ID)
+
+    # Without a location filter, the location column is shown.
+    visit "/vm-host-usage"
+    expect(page.title).to eq "Ubicloud Admin - VmHost Usage"
+    headers = page.all(".vm-host-usage-table thead th").map(&:text)
+    expect(headers).to include("location")
+    expect(page.all(".vm-host-usage-table tbody tr").size).to eq 2
+
+    # With a location filter, only matching hosts show and the location column is dropped.
+    visit "/vm-host-usage?location=#{Location::HETZNER_FSN1_UBID}"
+    headers = page.all(".vm-host-usage-table thead th").map(&:text)
+    expect(headers).not_to include("location")
+
+    row = page.all(".vm-host-usage-table tbody tr").map { it.all("td").map(&:text) }
+    expect(row.size).to eq 1
+    cells = row.first
+    expect(cells).to include(vm_host.ubid, "accepting", "fsn1-dc1", "2", "4 / 48", "32 / 375", "800 / 1500")
+    expect(cells).to include("spdk v23.09(100) ubiblk v0.4.1(70) v0.4.0(50)")
+  end
+
+  it "filters VmHost usage by arch, total_cores and state, composing filters" do
+    x64_48 = create_vm_host(arch: "x64", total_cores: 48, allocation_state: "accepting")
+    x64_96 = create_vm_host(arch: "x64", total_cores: 96, allocation_state: "draining")
+    arm_48 = create_vm_host(arch: "arm64", total_cores: 48, allocation_state: "accepting")
+
+    ubids = lambda do
+      page.all(".vm-host-usage-table tbody tr").map { it.all("td").first.text }
+    end
+
+    visit "/vm-host-usage?arch=arm64"
+    expect(ubids.call).to contain_exactly(arm_48.ubid)
+
+    visit "/vm-host-usage?cores=96"
+    expect(ubids.call).to contain_exactly(x64_96.ubid)
+
+    visit "/vm-host-usage?state=draining"
+    expect(ubids.call).to contain_exactly(x64_96.ubid)
+
+    # Clear all button only shows when a filter is active, and resets to all hosts.
+    expect(page).to have_button("Clear all")
+    click_button "Clear all"
+    expect(ubids.call).to contain_exactly(x64_48.ubid, x64_96.ubid, arm_48.ubid)
+    expect(page).to have_no_button("Clear all")
+
+    # Composed arch + cores + state filter.
+    visit "/vm-host-usage?arch=x64&cores=48&state=accepting"
+    expect(ubids.call).to contain_exactly(x64_48.ubid)
+
+    # Invalid filter values are ignored, so all hosts show.
+    visit "/vm-host-usage?arch=bogus&cores=7&state=nope"
+    expect(ubids.call).to contain_exactly(x64_48.ubid, x64_96.ubid, arm_48.ubid)
+  end
 end

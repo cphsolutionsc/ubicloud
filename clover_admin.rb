@@ -1334,6 +1334,129 @@ class CloverAdmin < Roda
       view("github_runner_usage")
     end
 
+    r.get "vm-host-usage" do
+      location_id = typecast_params.ubid_uuid("location")
+
+      # Distinct values actually present on hosts, for the filter links.
+      @locations = Location
+        .where(id: VmHost.select(:location_id))
+        .select_order_map([:name, :id])
+        .each { it[1] = UBID.to_ubid(it[1]) }
+      @archs = VmHost.exclude(arch: nil).distinct.select_order_map(:arch)
+      @core_counts = VmHost.exclude(total_cores: nil).distinct.select_order_map(:total_cores)
+      @states = VmHost.distinct.select_order_map(:allocation_state)
+
+      @location_id = location_id ? UBID.to_ubid(location_id) : nil
+      @arch = typecast_params.str("arch").then { @archs.include?(it) ? it : nil }
+      @cores = typecast_params.int("cores").then { @core_counts.include?(it) ? it : nil }
+      @state = typecast_params.str("state").then { @states.include?(it) ? it : nil }
+
+      # Each of these is pre-aggregated to one row per host, so they can be
+      # left-joined into the main query without fanning out rows (no cartesian
+      # product) and without issuing a query per host (no N+1).
+      storage_agg = DB[:storage_device]
+        .select_group(:vm_host_id)
+        .select_append(
+          Sequel.function(:sum, :total_storage_gib).as(:total_storage),
+          Sequel.function(:sum, :available_storage_gib).as(:available_storage),
+        )
+
+      # Installations with weight 0 are disabled/being removed, so skip them.
+      weight_entry = ->(version) { Sequel.join([version, "(", Sequel.cast(:allocation_weight, :text), ")"]) }
+
+      spdk_agg = DB[:spdk_installation]
+        .exclude(allocation_weight: 0)
+        .select_group(:vm_host_id)
+        .select_append(Sequel.function(:string_agg, weight_entry.call(:version), " ").order(Sequel.desc(:allocation_weight)).as(:spdk))
+
+      # version_code packs version as major*10000 + minor*100 + patch (see VhostBlockBackend#version).
+      vc = Sequel[:version_code]
+      ubiblk_version = Sequel.join([
+        "v", Sequel.cast(vc / 10000, :text), ".",
+        Sequel.cast(Sequel.function(:mod, vc, 10000) / 100, :text), ".",
+        Sequel.cast(Sequel.function(:mod, vc, 100), :text),
+      ])
+      ubiblk_agg = DB[:vhost_block_backend]
+        .exclude(allocation_weight: 0)
+        .select_group(:vm_host_id)
+        .select_append(Sequel.function(:string_agg, weight_entry.call(ubiblk_version), " ").order(Sequel.desc(:allocation_weight)).as(:ubiblk))
+
+      boot_agg = DB[:boot_image]
+        .select_group(:vm_host_id)
+        .select_append(Sequel.function(:count, :name).distinct.as(:image_types))
+
+      vm_agg = DB[:vm]
+        .select_group(:vm_host_id)
+        .select_append(Sequel.function(:count).*.as(:vm_count))
+
+      # Mirrors the allocator's available-IPv4 join (scheduling/allocator.rb): an
+      # IPv4 is available when it isn't assigned to a VM or to the host itself.
+      ip4_agg = DB[:ipv4_address]
+        .join(:address, [:cidr])
+        .left_join(:assigned_vm_address, Sequel[:assigned_vm_address][:ip] => Sequel[:ipv4_address][:ip])
+        .left_join(:assigned_host_address, Sequel[:assigned_host_address][:ip] => Sequel[:ipv4_address][:ip])
+        .select_group(Sequel[:address][:routed_to_host_id])
+        .select_append(
+          Sequel.function(:count).*.as(:total_ip4),
+          Sequel.function(:count).*.filter(Sequel[:assigned_vm_address][:ip] => nil, Sequel[:assigned_host_address][:ip] => nil).as(:available_ip4),
+        )
+
+      ds = DB[Sequel[:vm_host]]
+        .join(Sequel[:location], id: Sequel[:vm_host][:location_id])
+        .left_join(storage_agg.as(:sd), vm_host_id: Sequel[:vm_host][:id])
+        .left_join(spdk_agg.as(:sp), vm_host_id: Sequel[:vm_host][:id])
+        .left_join(ubiblk_agg.as(:ub), vm_host_id: Sequel[:vm_host][:id])
+        .left_join(boot_agg.as(:bi), vm_host_id: Sequel[:vm_host][:id])
+        .left_join(ip4_agg.as(:ip), routed_to_host_id: Sequel[:vm_host][:id])
+        .left_join(vm_agg.as(:vm), vm_host_id: Sequel[:vm_host][:id])
+        .select(
+          Sequel[:vm_host][:id],
+          Sequel[:location][:name].as(:location),
+          Sequel[:vm_host][:allocation_state],
+          Sequel[:vm_host][:data_center],
+          Sequel[:vm_host][:family],
+          Sequel.function(:coalesce, Sequel[:vm][:vm_count], 0).as(:vm_count),
+          Sequel[:vm_host][:used_cores],
+          Sequel[:vm_host][:total_cores],
+          Sequel[:vm_host][:used_hugepages_1g],
+          Sequel[:vm_host][:total_hugepages_1g],
+          Sequel.function(:coalesce, Sequel[:sd][:available_storage], 0).as(:available_storage),
+          Sequel.function(:coalesce, Sequel[:sd][:total_storage], 0).as(:total_storage),
+          Sequel[:sp][:spdk],
+          Sequel[:ub][:ubiblk],
+          Sequel.function(:coalesce, Sequel[:bi][:image_types], 0).as(:image_types),
+          Sequel.function(:coalesce, Sequel[:ip][:available_ip4], 0).as(:available_ip4),
+          Sequel.function(:coalesce, Sequel[:ip][:total_ip4], 0).as(:total_ip4),
+        )
+        .order(Sequel[:location][:name], Sequel[:vm_host][:data_center], Sequel[:vm_host][:family], Sequel[:vm_host][:id])
+
+      ds = ds.where(Sequel[:vm_host][:location_id] => location_id) if location_id
+      ds = ds.where(Sequel[:vm_host][:arch] => @arch) if @arch
+      ds = ds.where(Sequel[:vm_host][:total_cores] => @cores) if @cores
+      ds = ds.where(Sequel[:vm_host][:allocation_state] => @state) if @state
+
+      @data = ds.all.map do |row|
+        used_storage = row[:total_storage] - row[:available_storage]
+        used_ip4 = row[:total_ip4] - row[:available_ip4]
+        {
+          ubid: UBID.to_ubid(row[:id]),
+          location: row[:location],
+          state: row[:allocation_state],
+          datacenter: row[:data_center],
+          family: row[:family],
+          vms: row[:vm_count],
+          cores: "#{row[:used_cores]} / #{row[:total_cores]}",
+          hugepages: "#{row[:used_hugepages_1g]} / #{row[:total_hugepages_1g]}",
+          storage_gib: "#{used_storage} / #{row[:total_storage]}",
+          ip4: "#{used_ip4} / #{row[:total_ip4]}",
+          storage: [("spdk #{row[:spdk]}" if row[:spdk]), ("ubiblk #{row[:ubiblk]}" if row[:ubiblk])].compact.join(" "),
+          image_types: row[:image_types],
+        }.tap { it.delete(:location) if location_id }
+      end
+
+      view("vm_host_usage")
+    end
+
     r.post "close-admin-account" do
       login = typecast_params.nonempty_str!("login")
 
