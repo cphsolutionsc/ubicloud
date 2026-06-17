@@ -275,7 +275,7 @@ module Scheduling::Allocator
           apply_filter(:host) { ds = ds.where(Sequel[:vm_host][:id] => request.host_filter) }
         end
         unless request.host_exclusion_filter.empty?
-          apply_filter(:exclude_host) { ds = ds = ds.exclude(Sequel[:vm_host][:id] => request.host_exclusion_filter) }
+          apply_filter(:exclude_host) { ds = ds.exclude(Sequel[:vm_host][:id] => request.host_exclusion_filter) }
         end
         unless request.data_center_exclusion_filter.empty?
           apply_filter(:exclude_data_center) { ds = ds.exclude(Sequel[:vm_host][:data_center] => request.data_center_exclusion_filter) }
